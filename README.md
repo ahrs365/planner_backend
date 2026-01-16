@@ -26,13 +26,14 @@ Local planning algorithms backend for the web robot simulation.
 ### Build
 
 ```bash
-git clone <repo_url>
+# Download and extract, then:
 cd planner_backend
-
 mkdir build && cd build
 cmake ..
 make -j$(nproc)
 ```
+
+> All dependencies are included. No extra downloads needed.
 
 ### Run
 
@@ -82,13 +83,14 @@ Web 机器人仿真的本地规划算法后端。
 ### 编译
 
 ```bash
-git clone <repo_url>
+# 下载解压后:
 cd planner_backend
-
 mkdir build && cd build
 cmake ..
 make -j$(nproc)
 ```
+
+> 所有依赖已内置，无需额外下载。
 
 ### 运行
 
