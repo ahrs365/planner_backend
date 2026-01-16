@@ -73,6 +73,9 @@ if(BUILD_DDR_OPT_SERVER)
       ${SRC_DIR}/ddr-opt/path
       ${SRC_DIR}/ddr-opt/opt
   )
+  target_compile_definitions(ddr_opt_server PRIVATE
+    DDR_OPT_CONFIG_PATH="${SRC_DIR}/ddr-opt/opt/global_planning3ms.yaml"
+  )
 endif()
 
 # TMPC Server
@@ -99,6 +102,9 @@ if(BUILD_TMPC_SERVER)
       ${SRC_DIR}/tmpc/guidance_planner/include
       ${SRC_DIR}/tmpc/ros_tools_no_ros/include
       ${SRC_DIR}/tmpc/DecompUtil/include
+  )
+  target_compile_definitions(tmpc_server PRIVATE
+    TMPC_CONFIG_PATH="${SRC_DIR}/tmpc/mpc_planner_jackalsimulator/config/settings.yaml"
   )
   set_target_properties(tmpc_server PROPERTIES
     BUILD_RPATH "${ACADOS_LIB_DIR}"

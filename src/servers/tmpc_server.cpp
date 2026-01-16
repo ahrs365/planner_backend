@@ -355,7 +355,11 @@ void updateGuidanceTrajectories(const MPCPlanner::State &state, TmpcContext &ctx
 
 int main(int argc, char **argv) {
   int port = 8083;
-  std::string config_file = "src/tmpc/mpc_planner_jackalsimulator/config/settings.yaml";
+#ifdef TMPC_CONFIG_PATH
+  std::string config_file = TMPC_CONFIG_PATH;
+#else
+  std::string config_file = "settings.yaml";
+#endif
   if (argc > 1) {
     port = std::atoi(argv[1]);
   }
