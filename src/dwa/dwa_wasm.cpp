@@ -11,8 +11,10 @@ EMSCRIPTEN_BINDINGS(dwa_planner) {
       .function("bestCost", &DWAPlanner::bestCost)
       .function("setLimits", &DWAPlanner::setLimits)
       .function("setResolution", &DWAPlanner::setResolution)
+      .function("setSamples", &DWAPlanner::setSamples)
       .function("setPredict", &DWAPlanner::setPredict)
       .function("setWeights", &DWAPlanner::setWeights)
-      .function("setRobotRadius", &DWAPlanner::setRobotRadius);
+      .function("setRobotRadius", &DWAPlanner::setRobotRadius)
+      .function("setObsRange", &DWAPlanner::setObsRange);
   emscripten::register_vector<double>("VectorDouble");
 }

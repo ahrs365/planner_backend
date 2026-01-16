@@ -10,62 +10,124 @@ std::vector<double> DWAPlanner::plan(double x, double y, double theta,
                                      const std::vector<double> &obs_flat) {
   const Window win = calcDynamicWindow(v, w);
 
-  double best_cost = std::numeric_limits<double>::infinity();
-  double best_v = 0.0;
-  double best_w = 0.0;
+  // Calculate velocity and yawrate resolution based on sample counts
+  const double v_reso = std::max((win.v_max - win.v_min) / std::max(velocity_samples_ - 1, 1), 1e-6);
+  const double w_reso = std::max((win.w_max - win.w_min) / std::max(yawrate_samples_ - 1, 1), 1e-6);
 
-  best_cost_ = std::numeric_limits<double>::infinity();
-  best_traj_.clear();
-  for (double vt = win.v_min; vt <= win.v_max + 1e-6; vt += v_reso_) {
-    bool has_zero_w = false;
-    for (double wt = win.w_min; wt <= win.w_max + 1e-6; wt += yawrate_reso_) {
-      if (std::abs(wt) < 1e-9) has_zero_w = true;
+  std::vector<Cost> costs;
+  std::vector<std::vector<double>> trajectories;
+  std::vector<std::pair<double, double>> velocities;  // (v, w) pairs
+
+  // Sample trajectories
+  for (int i = 0; i < velocity_samples_; i++) {
+    const double vt = win.v_min + v_reso * i;
+    
+    for (int j = 0; j < yawrate_samples_; j++) {
+      double wt = win.w_min + w_reso * j;
+      
       std::vector<double> traj;
       simulateTrajectory(x, y, theta, vt, wt, traj);
 
-      const double to_goal = calcToGoalCost(traj, gx, gy);
-      const double obs_cost = calcObstacleCost(traj, obs_flat);
-      if (obs_cost >= kCollisionCost) {
-        continue;
-      }
-      const double speed_cost = max_speed_ - vt;
+      Cost cost;
+      cost.to_goal_cost = calcToGoalCost(traj, gx, gy);
+      Cost obs_result = calcObstacleCost(traj, obs_flat);
+      cost.obs_cost = obs_result.obs_cost;
+      cost.is_collision = obs_result.is_collision;
+      cost.speed_cost = win.v_max - vt;  // Use dynamic window max
 
-      const double cost = to_goal_cost_gain_ * to_goal +
-                          obstacle_cost_gain_ * obs_cost +
-                          speed_cost_gain_ * speed_cost;
-      if (cost < best_cost) {
-        best_cost = cost;
-        best_v = vt;
-        best_w = wt;
-        best_traj_ = traj;
-      }
+      costs.push_back(cost);
+      trajectories.push_back(traj);
+      velocities.push_back({vt, wt});
     }
-    if (!has_zero_w && win.w_min <= 0.0 && win.w_max >= 0.0) {
+
+    // Always sample w=0 if it's in the window
+    if (win.w_min < 0.0 && 0.0 < win.w_max) {
       const double wt = 0.0;
       std::vector<double> traj;
       simulateTrajectory(x, y, theta, vt, wt, traj);
 
-      const double to_goal = calcToGoalCost(traj, gx, gy);
-      const double obs_cost = calcObstacleCost(traj, obs_flat);
-      if (obs_cost >= kCollisionCost) {
-        continue;
-      }
-      const double speed_cost = max_speed_ - vt;
+      Cost cost;
+      cost.to_goal_cost = calcToGoalCost(traj, gx, gy);
+      Cost obs_result = calcObstacleCost(traj, obs_flat);
+      cost.obs_cost = obs_result.obs_cost;
+      cost.is_collision = obs_result.is_collision;
+      cost.speed_cost = win.v_max - vt;
 
-      const double cost = to_goal_cost_gain_ * to_goal +
-                          obstacle_cost_gain_ * obs_cost +
-                          speed_cost_gain_ * speed_cost;
-      if (cost < best_cost) {
-        best_cost = cost;
-        best_v = vt;
-        best_w = wt;
-        best_traj_ = traj;
+      costs.push_back(cost);
+      trajectories.push_back(traj);
+      velocities.push_back({vt, wt});
+    }
+  }
+
+  // Normalize costs before applying weights
+  normalizeCosts(costs);
+
+  // Find best trajectory
+  double min_total_cost = std::numeric_limits<double>::infinity();
+  int best_idx = -1;
+  
+  for (size_t i = 0; i < costs.size(); i++) {
+    if (!costs[i].is_collision) {
+      // Apply weights after normalization
+      costs[i].total_cost = to_goal_cost_gain_ * costs[i].to_goal_cost +
+                            obstacle_cost_gain_ * costs[i].obs_cost +
+                            speed_cost_gain_ * costs[i].speed_cost;
+      
+      if (costs[i].total_cost < min_total_cost) {
+        min_total_cost = costs[i].total_cost;
+        best_idx = static_cast<int>(i);
       }
     }
   }
 
-  best_cost_ = best_cost;
+  double best_v = 0.0;
+  double best_w = 0.0;
+  best_traj_.clear();
+
+  if (best_idx >= 0) {
+    best_v = velocities[best_idx].first;
+    best_w = velocities[best_idx].second;
+    best_traj_ = trajectories[best_idx];
+    best_cost_ = min_total_cost;
+  } else {
+    // No valid trajectory, stop
+    best_cost_ = std::numeric_limits<double>::infinity();
+  }
+
   return {best_v, best_w};
+}
+
+void DWAPlanner::normalizeCosts(std::vector<Cost> &costs) const {
+  if (costs.empty()) return;
+
+  double min_obs = std::numeric_limits<double>::infinity();
+  double max_obs = 0.0;
+  double min_goal = std::numeric_limits<double>::infinity();
+  double max_goal = 0.0;
+  double min_speed = std::numeric_limits<double>::infinity();
+  double max_speed = 0.0;
+
+  // Find min/max for non-collision trajectories
+  for (const auto &cost : costs) {
+    if (!cost.is_collision) {
+      min_obs = std::min(min_obs, cost.obs_cost);
+      max_obs = std::max(max_obs, cost.obs_cost);
+      min_goal = std::min(min_goal, cost.to_goal_cost);
+      max_goal = std::max(max_goal, cost.to_goal_cost);
+      min_speed = std::min(min_speed, cost.speed_cost);
+      max_speed = std::max(max_speed, cost.speed_cost);
+    }
+  }
+
+  // Normalize to [0, 1]
+  const double eps = 1e-9;
+  for (auto &cost : costs) {
+    if (!cost.is_collision) {
+      cost.obs_cost = (cost.obs_cost - min_obs) / (max_obs - min_obs + eps);
+      cost.to_goal_cost = (cost.to_goal_cost - min_goal) / (max_goal - min_goal + eps);
+      cost.speed_cost = (cost.speed_cost - min_speed) / (max_speed - min_speed + eps);
+    }
+  }
 }
 
 std::vector<double> DWAPlanner::sampleTrajectories(double x, double y, double theta,
@@ -75,13 +137,17 @@ std::vector<double> DWAPlanner::sampleTrajectories(double x, double y, double th
   const Window win = calcDynamicWindow(v, w);
   const int steps = predictSteps();
 
+  const double v_reso = std::max((win.v_max - win.v_min) / std::max(velocity_samples_ - 1, 1), 1e-6);
+  const double w_reso = std::max((win.w_max - win.w_min) / std::max(yawrate_samples_ - 1, 1), 1e-6);
+
   std::vector<double> out;
   int traj_count = 0;
 
-  for (double vt = win.v_min; vt <= win.v_max + 1e-6; vt += v_reso_) {
-    bool has_zero_w = false;
-    for (double wt = win.w_min; wt <= win.w_max + 1e-6; wt += yawrate_reso_) {
-      if (std::abs(wt) < 1e-9) has_zero_w = true;
+  for (int i = 0; i < velocity_samples_; i++) {
+    const double vt = win.v_min + v_reso * i;
+    
+    for (int j = 0; j < yawrate_samples_; j++) {
+      const double wt = win.w_min + w_reso * j;
       std::vector<double> traj;
       simulateTrajectory(x, y, theta, vt, wt, traj);
       if (traj.size() / 2 != static_cast<size_t>(steps)) {
@@ -90,7 +156,8 @@ std::vector<double> DWAPlanner::sampleTrajectories(double x, double y, double th
       out.insert(out.end(), traj.begin(), traj.end());
       traj_count++;
     }
-    if (!has_zero_w && win.w_min <= 0.0 && win.w_max >= 0.0) {
+    
+    if (win.w_min < 0.0 && 0.0 < win.w_max) {
       const double wt = 0.0;
       std::vector<double> traj;
       simulateTrajectory(x, y, theta, vt, wt, traj);
@@ -125,8 +192,14 @@ void DWAPlanner::setLimits(double max_speed, double min_speed,
 }
 
 void DWAPlanner::setResolution(double v_reso, double yawrate_reso) {
-  v_reso_ = v_reso;
-  yawrate_reso_ = yawrate_reso;
+  // Convert resolution to sample counts (for backward compatibility)
+  velocity_samples_ = std::max(static_cast<int>(max_speed_ / v_reso), 5);
+  yawrate_samples_ = std::max(static_cast<int>(2 * max_yawrate_ / yawrate_reso), 10);
+}
+
+void DWAPlanner::setSamples(int velocity_samples, int yawrate_samples) {
+  velocity_samples_ = std::max(velocity_samples, 3);
+  yawrate_samples_ = std::max(yawrate_samples, 5);
 }
 
 void DWAPlanner::setPredict(double dt, double predict_time) {
@@ -141,6 +214,8 @@ void DWAPlanner::setWeights(double to_goal, double obstacle, double speed) {
 }
 
 void DWAPlanner::setRobotRadius(double r) { robot_radius_ = r; }
+
+void DWAPlanner::setObsRange(double range) { obs_range_ = range; }
 
 DWAPlanner::Window DWAPlanner::calcDynamicWindow(double v, double w) const {
   const double v_min = std::max(min_speed_, v - max_accel_ * dt_);
@@ -183,15 +258,22 @@ double DWAPlanner::calcToGoalCost(const std::vector<double> &traj,
   return std::sqrt(dx * dx + dy * dy);
 }
 
-double DWAPlanner::calcObstacleCost(const std::vector<double> &traj,
-                                    const std::vector<double> &obs_flat) const {
-  if (obs_flat.empty()) return 0.0;
-  double min_dist = std::numeric_limits<double>::infinity();
+DWAPlanner::Cost DWAPlanner::calcObstacleCost(const std::vector<double> &traj,
+                                              const std::vector<double> &obs_flat) const {
+  Cost result;
+  if (obs_flat.empty()) {
+    result.obs_cost = 0.0;
+    result.is_collision = false;
+    return result;
+  }
+
+  double min_dist = obs_range_;
 
   for (size_t i = 0; i + 1 < traj.size(); i += 2) {
     const double tx = traj[i];
     const double ty = traj[i + 1];
     const double t = (static_cast<double>(i / 2) + 1.0) * dt_;
+    
     for (size_t j = 0; j + 4 < obs_flat.size(); j += 5) {
       const double ox0 = obs_flat[j];
       const double oy0 = obs_flat[j + 1];
@@ -203,13 +285,32 @@ double DWAPlanner::calcObstacleCost(const std::vector<double> &traj,
       const double dx = tx - ox;
       const double dy = ty - oy;
       const double dist = std::sqrt(dx * dx + dy * dy);
-      const double edge_dist = dist - orad;
-      if (edge_dist < min_dist) min_dist = edge_dist;
+      const double edge_dist = dist - orad - robot_radius_;
+      
+      if (edge_dist <= 0.0) {
+        result.is_collision = true;
+        result.obs_cost = 1e6;
+        return result;
+      }
+      
+      min_dist = std::min(min_dist, edge_dist);
     }
   }
 
-  if (min_dist <= robot_radius_) {
-    return kCollisionCost;
+  // Use inverse distance but with a safety margin
+  // Only significant cost when closer than safety_margin
+  const double safety_margin = 0.5;  // Start caring when closer than 0.5m
+  if (min_dist > obs_range_) {
+    result.obs_cost = 0.0;
+  } else if (min_dist > safety_margin) {
+    // Gentle cost increase when far from obstacles
+    result.obs_cost = 1.0 / (min_dist + 1.0);
+  } else {
+    // Steeper cost increase when close to obstacles
+    result.obs_cost = 1.0 / (min_dist + 0.1);
   }
-  return 1.0 / std::max(min_dist, 1e-6);
+  
+  result.is_collision = false;
+  return result;
 }
+
