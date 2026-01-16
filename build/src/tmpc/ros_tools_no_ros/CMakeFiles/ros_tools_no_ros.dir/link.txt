@@ -1,0 +1,2 @@
+/usr/bin/ar qc libros_tools_no_ros.a CMakeFiles/ros_tools_no_ros.dir/src/data_saver.cpp.o CMakeFiles/ros_tools_no_ros.dir/src/math.cpp.o CMakeFiles/ros_tools_no_ros.dir/src/profiling.cpp.o CMakeFiles/ros_tools_no_ros.dir/src/random_generator.cpp.o CMakeFiles/ros_tools_no_ros.dir/src/spline.cpp.o CMakeFiles/ros_tools_no_ros.dir/src/third_party/clothoid.cpp.o CMakeFiles/ros_tools_no_ros.dir/src/third_party/tkspline.cpp.o
+/usr/bin/ranlib libros_tools_no_ros.a

@@ -1,0 +1,1 @@
+/usr/bin/c++  -Wl,--disable-new-dtags CMakeFiles/dwa_server.dir/__/dwa/dwa_planner.cpp.o CMakeFiles/dwa_server.dir/dwa_server.cpp.o -o dwa_server  -Wl,-rpath,/home/gao/workspace/pnc_project/web_robot/backend/third_party/acados/lib 
