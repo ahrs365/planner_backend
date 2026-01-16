@@ -233,7 +233,7 @@ json serializeEsdfGrid(const navsim::perception::ESDFMap &map,
 
 int main(int argc, char **argv) {
   uint16_t port = 8082;
-  std::string config_path = "cpp/ddr-opt/opt/global_planning3ms.yaml";
+  std::string config_path = "src/ddr-opt/opt/global_planning3ms.yaml";
   if (argc > 1) {
     port = static_cast<uint16_t>(std::atoi(argv[1]));
   }
