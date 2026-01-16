@@ -1,4 +1,4 @@
-# Planner Backend
+# Planner Backend (planner_backend)
 
 [English](#english) | [中文](#中文)
 
