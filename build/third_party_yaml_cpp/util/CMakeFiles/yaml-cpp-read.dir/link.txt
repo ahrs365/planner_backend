@@ -1,1 +1,0 @@
-/usr/bin/c++  -Wl,--disable-new-dtags "CMakeFiles/yaml-cpp-read.dir/read.cpp.o" -o read  -Wl,-rpath,/home/gao/workspace/pnc_project/web_robot/backend/third_party/acados/lib ../libyaml-cpp.a 
