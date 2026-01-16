@@ -80,6 +80,11 @@ target_link_libraries(${PROJECT_NAME}
   Eigen3::Eigen
 )
 
+# Set config path at compile time
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+  GUIDANCE_PLANNER_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/config/params.yaml"
+)
+
 # Export include directories
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

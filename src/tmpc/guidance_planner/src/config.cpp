@@ -68,16 +68,13 @@ namespace GuidancePlanner
     debug_continuous_replanning_ = true;
 
     // Load YAML configuration file
-    std::string config_file = "config/params.yaml";
-
-    // Try to find the config file in common locations
     std::vector<std::string> search_paths = {
-      config_file,
-      "cpp/tmpc/guidance_planner/config/params.yaml",
-      "tmpc/guidance_planner/config/params.yaml",
-      "guidance_planner/config/params.yaml",
-      "../guidance_planner/config/params.yaml",
-      "../../guidance_planner/config/params.yaml"
+#ifdef GUIDANCE_PLANNER_CONFIG_PATH
+      GUIDANCE_PLANNER_CONFIG_PATH,
+#endif
+      "config/params.yaml",
+      "src/tmpc/guidance_planner/config/params.yaml",
+      "guidance_planner/config/params.yaml"
     };
 
     YAML::Node config;
