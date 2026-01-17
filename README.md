@@ -1,7 +1,6 @@
 # Planner Backend (planner_backend)
 
-![Uploading 1.gif…]()
-
+![1](https://github.com/user-attachments/assets/50dda76e-30ae-49fd-a57b-65f18b20056a)
 
 [English](#english) | [中文](#中文)
 
