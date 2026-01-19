@@ -13,6 +13,20 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
                                  Environment& env, Curve& trajectory,
                                  const Config& config) {
   const auto t0 = std::chrono::steady_clock::now();
+  const auto return_last_or_empty = [&]() -> bool {
+    if (has_last_) {
+      trajectory = last_trajectory_;
+      return true;
+    }
+    trajectory = Curve();
+    return false;
+  };
+  const double dx_goal = goal.x() - state.pose_.x();
+  const double dy_goal = goal.y() - state.pose_.y();
+  if (dx_goal * dx_goal + dy_goal * dy_goal <= 1.0 * 1.0) {
+    std::cout << "[bspline] Close to goal, stop planning" << std::endl;
+    return return_last_or_empty();
+  }
   std::cout << "[bspline] Plan start, goal=(" << goal.x() << "," << goal.y()
             << ")" << std::endl;
   config_ = config;
@@ -25,6 +39,11 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
   std::vector<Vec2d> layer_centers;
   SampleControlPoints(state, reference_line, env, control_point_samples,
                       layer_centers);
+  if (control_point_samples.size() <= 4) {
+    std::cout << "[bspline] Only 4 control point layers left, stop planning"
+              << std::endl;
+    return return_last_or_empty();
+  }
   const auto t3 = std::chrono::steady_clock::now();
   std::cout << "[bspline] Layers in window=" << control_point_samples.size()
             << std::endl;
@@ -99,6 +118,8 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
   std::vector<Point> control_path =
       BuildControlPointPath(sequences.front());
   trajectory = Curve(bspline_samples.front(), control_path);
+  last_trajectory_ = trajectory;
+  has_last_ = true;
   const auto t6 = std::chrono::steady_clock::now();
   const auto ms_total =
       std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t0).count();
@@ -194,19 +215,30 @@ void BsplineLatticePlanner::BuildGlobalSamples(const RobotState& state,
     std::vector<Vec2d> one_layer_sample;
     std::vector<Vec2d> one_layer_all;
     std::vector<Vec2d> one_layer_blocked;
-    for (double dy = -config_.sample_half_width_;
-         dy < config_.sample_half_width_ + 1e-6;
-         dy += config_.ctp_interval_y_) {
-      const double sample_x =
-          center_point.pose_.x() - dy * std::sin(theta);
-      const double sample_y =
-          center_point.pose_.y() + dy * std::cos(theta);
-      Vec2d sample(sample_x, sample_y);
+    const bool is_last = (i + 1) >= reference_points.size();
+    if (is_last) {
+      Vec2d sample(center_point.pose_.x(), center_point.pose_.y());
       one_layer_all.emplace_back(sample);
       if (!env.IsCollision(sample, config_.collision_margin_)) {
         one_layer_sample.emplace_back(sample);
       } else {
         one_layer_blocked.emplace_back(sample);
+      }
+    } else {
+      for (double dy = -config_.sample_half_width_;
+           dy < config_.sample_half_width_ + 1e-6;
+           dy += config_.ctp_interval_y_) {
+        const double sample_x =
+            center_point.pose_.x() - dy * std::sin(theta);
+        const double sample_y =
+            center_point.pose_.y() + dy * std::cos(theta);
+        Vec2d sample(sample_x, sample_y);
+        one_layer_all.emplace_back(sample);
+        if (!env.IsCollision(sample, config_.collision_margin_)) {
+          one_layer_sample.emplace_back(sample);
+        } else {
+          one_layer_blocked.emplace_back(sample);
+        }
       }
     }
 
@@ -262,12 +294,18 @@ void BsplineLatticePlanner::SampleControlPoints(
   const size_t front_index =
       reference_line.FindNearestIndex(front_ctp.x(), front_ctp.y());
   const double front_s = reference_points.at(front_index).s_;
-  size_t window_start = 0;
+  size_t window_start = cached_layer_s_.size();
   for (size_t i = 0; i < cached_layer_s_.size(); ++i) {
     if (cached_layer_s_[i] - front_s >= config_.ctp_interval_x_) {
       window_start = i;
       break;
     }
+  }
+  if (window_start >= cached_layer_s_.size()) {
+    const size_t last_layer = cached_valid_control_points_.empty()
+                                  ? 0
+                                  : cached_valid_control_points_.size() - 1;
+    window_start = last_layer;
   }
   size_t window_count = 0;
   std::vector<std::vector<Vec2d>> active_control_points;

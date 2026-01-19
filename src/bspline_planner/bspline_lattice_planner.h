@@ -39,6 +39,8 @@ class BsplineLatticePlanner {
 
   Config config_;
   DebugInfo debug_info_;
+  Curve last_trajectory_;
+  bool has_last_ = false;
   bool has_cache_ = false;
   Vec2d cached_goal_;
   std::size_t cached_config_sig_ = 0;
