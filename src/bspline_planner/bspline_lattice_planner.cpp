@@ -158,15 +158,23 @@ void BsplineLatticePlanner::EnsureGlobalSamples(const RobotState& state,
   hash_combine(config_sig, config_.sample_half_width_);
   hash_combine(config_sig, config_.ctp_interval_y_);
   hash_combine(config_sig, config_.collision_margin_);
+  std::size_t env_sig = 0;
+  for (const auto& obs : env.obstacles_) {
+    hash_combine(env_sig, obs.center.x());
+    hash_combine(env_sig, obs.center.y());
+    hash_combine(env_sig, obs.radius);
+  }
 
   const double dx = goal.x() - cached_goal_.x();
   const double dy = goal.y() - cached_goal_.y();
   const bool goal_changed = !has_cache_ || (dx * dx + dy * dy) > 1e-6;
   const bool config_changed = !has_cache_ || config_sig != cached_config_sig_;
-  if (goal_changed || config_changed) {
+  const bool env_changed = !has_cache_ || env_sig != cached_env_sig_;
+  if (goal_changed || config_changed || env_changed) {
     BuildGlobalSamples(state, goal, env);
     cached_goal_ = goal;
     cached_config_sig_ = config_sig;
+    cached_env_sig_ = env_sig;
     has_cache_ = true;
   }
 }
@@ -188,18 +196,6 @@ void BsplineLatticePlanner::BuildGlobalSamples(const RobotState& state,
     return;
   }
 
-  auto segment_distance_squared = [](const Vec2d& a, const Vec2d& b,
-                                     const Vec2d& p) -> double {
-    const Vec2d ab = b - a;
-    const double ab_len2 = ab.x() * ab.x() + ab.y() * ab.y();
-    if (ab_len2 < 1e-9) {
-      return DistanceSquared(a, p);
-    }
-    const double t = ((p.x() - a.x()) * ab.x() + (p.y() - a.y()) * ab.y()) / ab_len2;
-    const double t_clamped = std::max(0.0, std::min(1.0, t));
-    const Vec2d proj(a.x() + ab.x() * t_clamped, a.y() + ab.y() * t_clamped);
-    return DistanceSquared(proj, p);
-  };
   const double robot_radius =
       0.5 * std::max(config_.vehicle_length_, config_.vehicle_width_) +
       config_.collision_margin_;
@@ -247,18 +243,9 @@ void BsplineLatticePlanner::BuildGlobalSamples(const RobotState& state,
     cached_valid_control_points_.push_back(one_layer_sample);
     cached_layer_centers_.push_back(center_point.pose_);
     cached_layer_s_.push_back(center_point.s_);
-    bool has_obstacle = false;
-    if (one_layer_all.size() >= 2) {
-      const Vec2d& left = one_layer_all.front();
-      const Vec2d& right = one_layer_all.back();
-      for (const auto& obs : env.obstacles_) {
-        const double dist2 = segment_distance_squared(left, right, obs.center);
-        const double r = obs.radius + robot_radius;
-        if (dist2 <= r * r) {
-          has_obstacle = true;
-          break;
-        }
-      }
+    bool has_obstacle = !one_layer_blocked.empty();
+    if (!has_obstacle) {
+      has_obstacle = env.IsCollision(center_point.pose_, robot_radius);
     }
     cached_layer_has_obstacle_.push_back(has_obstacle);
     last_s = center_point.s_;
@@ -478,12 +465,28 @@ BsplineLatticePlanner::GenerateControlPointSequences(
     if (candidates.empty()) {
       continue;
     }
+    std::vector<Vec2d> layer_candidates = candidates;
+    if (config_.max_candidate_paths_ > 0 &&
+        layer_candidates.size() > config_.max_candidate_paths_) {
+      const Vec2d& center = layer_centers[layer];
+      std::nth_element(
+          layer_candidates.begin(),
+          layer_candidates.begin() + config_.max_candidate_paths_,
+          layer_candidates.end(),
+          [&](const Vec2d& a, const Vec2d& b) {
+            return DistanceSquared(a, center) < DistanceSquared(b, center);
+          });
+      layer_candidates.resize(config_.max_candidate_paths_);
+    }
     std::vector<PathCandidate> next_beam;
-    next_beam.reserve(beam.size() * candidates.size());
+    next_beam.reserve(beam.size() * layer_candidates.size());
     const size_t hard_cap = std::max<size_t>(config_.max_sequences_, 1);
     const size_t soft_cap = hard_cap * 4;
     for (const auto& prev : beam) {
-      if (layer >= 5) {
+      const bool force_full = (layer == 3 || layer == 4);
+      const bool has_obstacle =
+          layer < window_layer_force_full_.size() && window_layer_force_full_[layer];
+      if (!force_full && !has_obstacle) {
         const Vec2d& center = layer_centers[layer];
         PathCandidate c = prev;
         c.points.push_back(center);
@@ -493,7 +496,7 @@ BsplineLatticePlanner::GenerateControlPointSequences(
         }
         next_beam.push_back(std::move(c));
       } else {
-        for (const auto& p : candidates) {
+        for (const auto& p : layer_candidates) {
           PathCandidate c = prev;
           c.points.push_back(p);
           c.cost = compute_cost(c.points);

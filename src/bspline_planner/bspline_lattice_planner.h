@@ -44,6 +44,7 @@ class BsplineLatticePlanner {
   bool has_cache_ = false;
   Vec2d cached_goal_;
   std::size_t cached_config_sig_ = 0;
+  std::size_t cached_env_sig_ = 0;
   ReferenceLine cached_reference_line_;
   std::vector<std::vector<Vec2d>> cached_all_control_points_;
   std::vector<std::vector<Vec2d>> cached_blocked_control_points_;
