@@ -39,6 +39,7 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
   std::vector<Vec2d> layer_centers;
   SampleControlPoints(state, reference_line, env, control_point_samples,
                       layer_centers);
+  const auto t2b = std::chrono::steady_clock::now();
   if (control_point_samples.size() <= 4) {
     std::cout << "[bspline] Only 4 control point layers left, stop planning"
               << std::endl;
@@ -50,6 +51,7 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
 
   std::vector<std::vector<Vec2d>> sequences = GenerateControlPointSequences(
       goal, control_point_samples, layer_centers, env);
+  const auto t3b = std::chrono::steady_clock::now();
   const auto t4 = std::chrono::steady_clock::now();
   std::cout << "[bspline] Control point sequences=" << sequences.size()
             << std::endl;
@@ -126,9 +128,13 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
   const auto ms_cache =
       std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
   const auto ms_sample =
-      std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
+      std::chrono::duration_cast<std::chrono::milliseconds>(t2b - t2).count();
+  const auto ms_window =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2b).count();
+  const auto ms_sequence =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t3b - t3).count();
   const auto ms_search =
-      std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count();
+      std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3b).count();
   const auto ms_curve =
       std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count();
   const auto ms_build =
@@ -136,6 +142,8 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
   std::cout << "[bspline] ms total=" << ms_total
             << " cache=" << ms_cache
             << " sample=" << ms_sample
+            << " window=" << ms_window
+            << " sequence=" << ms_sequence
             << " search=" << ms_search
             << " curve=" << ms_curve
             << " build=" << ms_build << std::endl;
@@ -382,6 +390,7 @@ BsplineLatticePlanner::GenerateControlPointSequences(
     const Vec2d& goal,
     const std::vector<std::vector<Vec2d>>& control_point_samples,
     const std::vector<Vec2d>& layer_centers, const Environment& env) {
+  const auto t0 = std::chrono::steady_clock::now();
   const auto rect_collision = [&](const Vec2d& pos, double heading) -> bool {
     const double half_l = 0.5 * config_.vehicle_length_ + config_.collision_margin_;
     const double half_w = 0.5 * config_.vehicle_width_ + config_.collision_margin_;
@@ -461,6 +470,7 @@ BsplineLatticePlanner::GenerateControlPointSequences(
     beam.push_back(std::move(c));
   }
   for (size_t layer = 1; layer < control_point_samples.size(); ++layer) {
+    const auto t_layer0 = std::chrono::steady_clock::now();
     const auto& candidates = control_point_samples[layer];
     if (candidates.empty()) {
       continue;
@@ -534,6 +544,15 @@ BsplineLatticePlanner::GenerateControlPointSequences(
                 });
     }
     beam = std::move(next_beam);
+    const auto t_layer1 = std::chrono::steady_clock::now();
+    const auto ms_layer =
+        std::chrono::duration_cast<std::chrono::milliseconds>(t_layer1 - t_layer0).count();
+    if (ms_layer > 0) {
+      std::cout << "[bspline] layer " << layer
+                << " candidates=" << layer_candidates.size()
+                << " beam=" << beam.size()
+                << " ms=" << ms_layer << std::endl;
+    }
   }
 
   std::sort(beam.begin(), beam.end(),
@@ -549,6 +568,12 @@ BsplineLatticePlanner::GenerateControlPointSequences(
   for (auto& c : beam) {
     c.points.push_back(goal);
     sequences.push_back(std::move(c.points));
+  }
+  const auto t1 = std::chrono::steady_clock::now();
+  const auto ms_total =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+  if (ms_total > 0) {
+    std::cout << "[bspline] sequences total ms=" << ms_total << std::endl;
   }
   return sequences;
 }
