@@ -1,7 +1,5 @@
 #include "bspline_curve.h"
 
-#include <Eigen/Dense>
-
 #include "bspline_math.h"
 namespace ahrs {
 BsplineCurve::BsplineCurve(const double& interval)
@@ -14,6 +12,10 @@ std::vector<Point> BsplineCurve::GenerateCurve() {
   if (ctp_size_ < 4) {
     return trajectory;
   }
+  const size_t segments = ctp_size_ - 3;
+  const size_t samples_per_segment =
+      static_cast<size_t>(std::ceil(1.0 / std::max(interval_, 1e-6)));
+  trajectory.reserve(segments * samples_per_segment);
   for (size_t i = 0; i < ctp_size_ - 3; ++i) {
     for (double j = 0; j < 1.0; j += interval_) {
       Point p = GetPos(i, j);
@@ -30,34 +32,42 @@ void BsplineCurve::SetControlPoints(const std::vector<Vec2d>& control_points) {
 }
 
 Point BsplineCurve::GetPos(const size_t& k, const double& ti) {
-  Eigen::MatrixXd m(4, 4);
-  m << -1, 3, -3, 1, 3, -6, 3, 0, -3, 0, 3, 0, 1, 4, 1, 0;
+  const double t = ti;
+  const double t2 = t * t;
+  const double t3 = t2 * t;
 
-  Eigen::MatrixXd t(1, 4);
-  Eigen::MatrixXd dt(1, 4);
-  Eigen::MatrixXd ddt(1, 4);
-  t << ti * ti * ti, ti * ti, ti, 1;
-  dt << 3 * ti * ti, 2 * ti, 1, 0;
-  ddt << 6 * ti, 2, 0, 0;
+  const double b0 = (-t3 + 3.0 * t2 - 3.0 * t + 1.0) / 6.0;
+  const double b1 = (3.0 * t3 - 6.0 * t2 + 4.0) / 6.0;
+  const double b2 = (-3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0) / 6.0;
+  const double b3 = t3 / 6.0;
 
-  Eigen::MatrixXd p(4, 2);
-  for (size_t i = 0; i < 4; i++) {
-    p(i, 0) = ctp_[(k + i) % ctp_size_].x() / 6.0;
-    p(i, 1) = ctp_[(k + i) % ctp_size_].y() / 6.0;
-  }
+  const double db0 = (-3.0 * t2 + 6.0 * t - 3.0) / 6.0;
+  const double db1 = (9.0 * t2 - 12.0 * t) / 6.0;
+  const double db2 = (-9.0 * t2 + 6.0 * t + 3.0) / 6.0;
+  const double db3 = (3.0 * t2) / 6.0;
 
-  Eigen::MatrixXd pos = t * m * p;
-  Eigen::MatrixXd first_derivative = dt * m * p;
-  Eigen::MatrixXd second_derivative = ddt * m * p;
+  const double ddb0 = (1.0 - t);
+  const double ddb1 = (3.0 * t - 2.0);
+  const double ddb2 = (-3.0 * t + 1.0);
+  const double ddb3 = t;
 
-  double f_x = first_derivative(0, 0);
-  double f_y = first_derivative(0, 1);
-  double s_x = second_derivative(0, 0);
-  double s_y = second_derivative(0, 1);
-  double kappa = std::fabs(f_x * s_y - s_x * f_y) /
-                 std::sqrt(std::pow(f_x * f_x + f_y * f_y, 3));
+  const Vec2d& p0 = ctp_[k];
+  const Vec2d& p1 = ctp_[k + 1];
+  const Vec2d& p2 = ctp_[k + 2];
+  const Vec2d& p3 = ctp_[k + 3];
 
-  Point res(pos(0, 0), pos(0, 1));
+  const double x = b0 * p0.x() + b1 * p1.x() + b2 * p2.x() + b3 * p3.x();
+  const double y = b0 * p0.y() + b1 * p1.y() + b2 * p2.y() + b3 * p3.y();
+
+  const double f_x = db0 * p0.x() + db1 * p1.x() + db2 * p2.x() + db3 * p3.x();
+  const double f_y = db0 * p0.y() + db1 * p1.y() + db2 * p2.y() + db3 * p3.y();
+  const double s_x = ddb0 * p0.x() + ddb1 * p1.x() + ddb2 * p2.x() + ddb3 * p3.x();
+  const double s_y = ddb0 * p0.y() + ddb1 * p1.y() + ddb2 * p2.y() + ddb3 * p3.y();
+  const double denom = std::pow(f_x * f_x + f_y * f_y, 1.5);
+  const double kappa =
+      denom > 1e-9 ? std::fabs(f_x * s_y - s_x * f_y) / denom : 0.0;
+
+  Point res(x, y);
   res.kappa_ = kappa;
   res.theta_ = NormalizeAngle(std::atan2(f_y, f_x));
 

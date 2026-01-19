@@ -15,6 +15,10 @@ class BsplineLatticePlanner {
   const DebugInfo& GetDebugInfo() const { return debug_info_; }
 
  private:
+  void EnsureGlobalSamples(const RobotState& state, const Vec2d& goal,
+                           Environment& env);
+  void BuildGlobalSamples(const RobotState& state, const Vec2d& goal,
+                          Environment& env);
   void SampleControlPoints(
       const RobotState& state, const ReferenceLine& reference_line,
       Environment& env, std::vector<std::vector<Vec2d>>& control_point_samples,
@@ -35,6 +39,17 @@ class BsplineLatticePlanner {
 
   Config config_;
   DebugInfo debug_info_;
+  bool has_cache_ = false;
+  Vec2d cached_goal_;
+  std::size_t cached_config_sig_ = 0;
+  ReferenceLine cached_reference_line_;
+  std::vector<std::vector<Vec2d>> cached_all_control_points_;
+  std::vector<std::vector<Vec2d>> cached_blocked_control_points_;
+  std::vector<std::vector<Vec2d>> cached_valid_control_points_;
+  std::vector<Vec2d> cached_layer_centers_;
+  std::vector<double> cached_layer_s_;
+  std::vector<bool> cached_layer_has_obstacle_;
+  std::vector<bool> window_layer_force_full_;
 };
 
 }  // namespace ahrs

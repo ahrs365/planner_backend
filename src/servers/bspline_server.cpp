@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <iostream>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -25,11 +26,16 @@ struct PlannerParams {
   double vehicle_length = 0.7;
   double vehicle_width = 0.7;
   double collision_margin = 0.05;
+  size_t max_layers = 10;
+  size_t spread_layers = 2;
+  double w_spread = 0.6;
   size_t beam_width = 8;
   size_t max_candidate_paths = 12;
   double w_center = 1.0;
   double w_smooth = 1.5;
   double w_collision = 1000.0;
+  size_t max_sequences = 2000;
+  size_t max_visual_trajectories = 200;
 };
 
 PlannerParams readParams(const json& payload) {
@@ -46,11 +52,17 @@ PlannerParams readParams(const json& payload) {
   p.vehicle_length = params.value("vehicleLength", p.vehicle_length);
   p.vehicle_width = params.value("vehicleWidth", p.vehicle_width);
   p.collision_margin = params.value("collisionMargin", p.collision_margin);
+  p.max_layers = params.value("maxLayers", p.max_layers);
+  p.spread_layers = params.value("spreadLayers", p.spread_layers);
+  p.w_spread = params.value("wSpread", p.w_spread);
   p.beam_width = params.value("beamWidth", p.beam_width);
   p.max_candidate_paths = params.value("maxCandidatePaths", p.max_candidate_paths);
   p.w_center = params.value("wCenter", p.w_center);
   p.w_smooth = params.value("wSmooth", p.w_smooth);
   p.w_collision = params.value("wCollision", p.w_collision);
+  p.max_sequences = params.value("maxSequences", p.max_sequences);
+  p.max_visual_trajectories =
+      params.value("maxVisualTrajectories", p.max_visual_trajectories);
   return p;
 }
 
@@ -165,17 +177,30 @@ int main(int argc, char** argv) {
       config.vehicle_length_ = params.vehicle_length;
       config.vehicle_width_ = params.vehicle_width;
       config.collision_margin_ = params.collision_margin;
+      config.max_layers_ = params.max_layers;
+      config.spread_layers_ = params.spread_layers;
+      config.w_spread_ = params.w_spread;
       config.beam_width_ = params.beam_width;
       config.max_candidate_paths_ = params.max_candidate_paths;
       config.w_center_ = params.w_center;
       config.w_smooth_ = params.w_smooth;
       config.w_collision_ = params.w_collision;
+      config.max_sequences_ = params.max_sequences;
 
       ahrs::Environment env;
       env.obstacles_ = readObstacles(payload);
 
       ahrs::Curve trajectory;
+      std::cout << "[bspline_server] plan request, obstacles="
+                << env.obstacles_.size() << std::endl;
+      const auto t0 = std::chrono::steady_clock::now();
       const bool ok = planner.Plan(robot_state, goal_pos, env, trajectory, config);
+      const auto t1 = std::chrono::steady_clock::now();
+      const auto ms_total =
+          std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+      std::cout << "[bspline_server] plan result ok=" << ok
+                << " points=" << trajectory.points_.size()
+                << " ms=" << ms_total << std::endl;
 
       json response;
       response["type"] = "trajectory";
@@ -183,10 +208,26 @@ int main(int argc, char** argv) {
       response["trajectory"] = serializeTrajectory(trajectory.points_);
       response["controlPoints"] = serializeControlPoints(trajectory.control_points_);
 
+      const auto& debug_info = planner.GetDebugInfo();
+      const size_t total = debug_info.bspline_samples_.size();
+      const size_t limit = std::min(total, params.max_visual_trajectories);
+      if (limit > 0) {
+        std::vector<std::vector<ahrs::Point>> vis_samples;
+        vis_samples.reserve(limit);
+        for (size_t i = 0; i < limit; ++i) {
+            vis_samples.push_back(debug_info.bspline_samples_[i]);
+        }
+        response["trajectories"] = serializeTrajectories(vis_samples);
+      } else {
+        response["trajectories"] = json::array();
+      }
+
       const bool want_debug = payload.value("wantDebug", false);
       if (want_debug) {
         const auto& debug = planner.GetDebugInfo();
         json sampled_layers = json::array();
+        json blocked_layers = json::array();
+        json active_layers = json::array();
         for (const auto& layer : debug.sample_control_points_) {
           json layer_points = json::array();
           for (const auto& p : layer) {
@@ -194,11 +235,31 @@ int main(int argc, char** argv) {
           }
           sampled_layers.push_back(layer_points);
         }
+        for (const auto& layer : debug.blocked_control_points_) {
+          json layer_points = json::array();
+          for (const auto& p : layer) {
+            layer_points.push_back({{"x", p.x()}, {"y", p.y()}});
+          }
+          blocked_layers.push_back(layer_points);
+        }
+        for (const auto& layer : debug.active_control_points_) {
+          json layer_points = json::array();
+          for (const auto& p : layer) {
+            layer_points.push_back({{"x", p.x()}, {"y", p.y()}});
+          }
+          active_layers.push_back(layer_points);
+        }
         response["sampledControlPoints"] = sampled_layers;
+        response["blockedControlPoints"] = blocked_layers;
+        response["activeControlPoints"] = active_layers;
+        if (debug.active_bounds_.size() == 2) {
+          response["activeBounds"] = {
+              {"min", {{"x", debug.active_bounds_[0].x()}, {"y", debug.active_bounds_[0].y()}}},
+              {"max", {{"x", debug.active_bounds_[1].x()}, {"y", debug.active_bounds_[1].y()}}},
+          };
+        }
         response["referenceLine"] =
             serializeReferenceLine(debug.reference_line_points_);
-        response["trajectories"] =
-            serializeTrajectories(debug.bspline_samples_);
       }
 
       server.send(hdl, response.dump(), websocketpp::frame::opcode::text);

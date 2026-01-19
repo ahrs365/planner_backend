@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <iostream>
+#include <chrono>
 
 #include "bspline_curve.h"
 #include "bspline_lattice_planner.h"
@@ -10,16 +12,28 @@ namespace ahrs {
 bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
                                  Environment& env, Curve& trajectory,
                                  const Config& config) {
+  const auto t0 = std::chrono::steady_clock::now();
+  std::cout << "[bspline] Plan start, goal=(" << goal.x() << "," << goal.y()
+            << ")" << std::endl;
   config_ = config;
-  ReferenceLine reference_line(state.pose_, goal, config_.reference_interval_);
+  const auto t1 = std::chrono::steady_clock::now();
+  EnsureGlobalSamples(state, goal, env);
+  const auto t2 = std::chrono::steady_clock::now();
+  const ReferenceLine& reference_line = cached_reference_line_;
 
   std::vector<std::vector<Vec2d>> control_point_samples;
   std::vector<Vec2d> layer_centers;
   SampleControlPoints(state, reference_line, env, control_point_samples,
                       layer_centers);
+  const auto t3 = std::chrono::steady_clock::now();
+  std::cout << "[bspline] Layers in window=" << control_point_samples.size()
+            << std::endl;
 
   std::vector<std::vector<Vec2d>> sequences = GenerateControlPointSequences(
       goal, control_point_samples, layer_centers, env);
+  const auto t4 = std::chrono::steady_clock::now();
+  std::cout << "[bspline] Control point sequences=" << sequences.size()
+            << std::endl;
   if (sequences.empty()) {
     return false;
   }
@@ -73,8 +87,10 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
       bspline_samples.push_back(points);
     }
   }
+  const auto t5 = std::chrono::steady_clock::now();
 
   if (bspline_samples.empty()) {
+    std::cout << "[bspline] All samples filtered (collision)" << std::endl;
     return false;
   }
 
@@ -83,7 +99,138 @@ bool BsplineLatticePlanner::Plan(const RobotState& state, const Vec2d& goal,
   std::vector<Point> control_path =
       BuildControlPointPath(sequences.front());
   trajectory = Curve(bspline_samples.front(), control_path);
+  const auto t6 = std::chrono::steady_clock::now();
+  const auto ms_total =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t0).count();
+  const auto ms_cache =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+  const auto ms_sample =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t3 - t2).count();
+  const auto ms_search =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t4 - t3).count();
+  const auto ms_curve =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t5 - t4).count();
+  const auto ms_build =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t6 - t5).count();
+  std::cout << "[bspline] ms total=" << ms_total
+            << " cache=" << ms_cache
+            << " sample=" << ms_sample
+            << " search=" << ms_search
+            << " curve=" << ms_curve
+            << " build=" << ms_build << std::endl;
+  std::cout << "[bspline] Plan done, curves=" << bspline_samples.size()
+            << std::endl;
   return true;
+}
+
+void BsplineLatticePlanner::EnsureGlobalSamples(const RobotState& state,
+                                                const Vec2d& goal,
+                                                Environment& env) {
+  auto hash_combine = [](std::size_t& seed, double value) {
+    const std::size_t h = std::hash<double>{}(value);
+    seed ^= h + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  };
+  std::size_t config_sig = 0;
+  hash_combine(config_sig, config_.reference_interval_);
+  hash_combine(config_sig, config_.sample_length_);
+  hash_combine(config_sig, config_.ctp_interval_x_);
+  hash_combine(config_sig, config_.sample_half_width_);
+  hash_combine(config_sig, config_.ctp_interval_y_);
+  hash_combine(config_sig, config_.collision_margin_);
+
+  const double dx = goal.x() - cached_goal_.x();
+  const double dy = goal.y() - cached_goal_.y();
+  const bool goal_changed = !has_cache_ || (dx * dx + dy * dy) > 1e-6;
+  const bool config_changed = !has_cache_ || config_sig != cached_config_sig_;
+  if (goal_changed || config_changed) {
+    BuildGlobalSamples(state, goal, env);
+    cached_goal_ = goal;
+    cached_config_sig_ = config_sig;
+    has_cache_ = true;
+  }
+}
+
+void BsplineLatticePlanner::BuildGlobalSamples(const RobotState& state,
+                                               const Vec2d& goal,
+                                               Environment& env) {
+  cached_reference_line_ =
+      ReferenceLine(state.pose_, goal, config_.reference_interval_);
+  const std::vector<Point>& reference_points = cached_reference_line_.GetPoints();
+  cached_all_control_points_.clear();
+  cached_blocked_control_points_.clear();
+  cached_valid_control_points_.clear();
+  cached_layer_centers_.clear();
+  cached_layer_s_.clear();
+  cached_layer_has_obstacle_.clear();
+
+  if (reference_points.empty()) {
+    return;
+  }
+
+  auto segment_distance_squared = [](const Vec2d& a, const Vec2d& b,
+                                     const Vec2d& p) -> double {
+    const Vec2d ab = b - a;
+    const double ab_len2 = ab.x() * ab.x() + ab.y() * ab.y();
+    if (ab_len2 < 1e-9) {
+      return DistanceSquared(a, p);
+    }
+    const double t = ((p.x() - a.x()) * ab.x() + (p.y() - a.y()) * ab.y()) / ab_len2;
+    const double t_clamped = std::max(0.0, std::min(1.0, t));
+    const Vec2d proj(a.x() + ab.x() * t_clamped, a.y() + ab.y() * t_clamped);
+    return DistanceSquared(proj, p);
+  };
+  const double robot_radius =
+      0.5 * std::max(config_.vehicle_length_, config_.vehicle_width_) +
+      config_.collision_margin_;
+
+  double last_s = reference_points.front().s_ - config_.ctp_interval_x_;
+  for (size_t i = 0; i < reference_points.size(); ++i) {
+    const Point& center_point = reference_points[i];
+    if (center_point.s_ - last_s < config_.ctp_interval_x_) {
+      continue;
+    }
+
+    const double theta = center_point.theta_;
+    std::vector<Vec2d> one_layer_sample;
+    std::vector<Vec2d> one_layer_all;
+    std::vector<Vec2d> one_layer_blocked;
+    for (double dy = -config_.sample_half_width_;
+         dy < config_.sample_half_width_ + 1e-6;
+         dy += config_.ctp_interval_y_) {
+      const double sample_x =
+          center_point.pose_.x() - dy * std::sin(theta);
+      const double sample_y =
+          center_point.pose_.y() + dy * std::cos(theta);
+      Vec2d sample(sample_x, sample_y);
+      one_layer_all.emplace_back(sample);
+      if (!env.IsCollision(sample, config_.collision_margin_)) {
+        one_layer_sample.emplace_back(sample);
+      } else {
+        one_layer_blocked.emplace_back(sample);
+      }
+    }
+
+    cached_all_control_points_.push_back(one_layer_all);
+    cached_blocked_control_points_.push_back(one_layer_blocked);
+    cached_valid_control_points_.push_back(one_layer_sample);
+    cached_layer_centers_.push_back(center_point.pose_);
+    cached_layer_s_.push_back(center_point.s_);
+    bool has_obstacle = false;
+    if (one_layer_all.size() >= 2) {
+      const Vec2d& left = one_layer_all.front();
+      const Vec2d& right = one_layer_all.back();
+      for (const auto& obs : env.obstacles_) {
+        const double dist2 = segment_distance_squared(left, right, obs.center);
+        const double r = obs.radius + robot_radius;
+        if (dist2 <= r * r) {
+          has_obstacle = true;
+          break;
+        }
+      }
+    }
+    cached_layer_has_obstacle_.push_back(has_obstacle);
+    last_s = center_point.s_;
+  }
 }
 
 void BsplineLatticePlanner::SampleControlPoints(
@@ -106,46 +253,67 @@ void BsplineLatticePlanner::SampleControlPoints(
   layer_centers.push_back(state.pose_);
   control_point_samples.push_back({front_ctp});
   layer_centers.push_back(front_ctp);
+  window_layer_force_full_.clear();
+  window_layer_force_full_.push_back(false);
+  window_layer_force_full_.push_back(false);
+  window_layer_force_full_.push_back(false);
 
-  const size_t start_index =
-      reference_line.FindNearestIndex(state.pose_.x(), state.pose_.y());
-  const double start_s = reference_points.at(start_index).s_;
-  const double end_s = start_s + config_.sample_length_;
-  const size_t end_index = reference_line.FindNearestIndexAtLength(end_s);
-
-  double last_s = start_s + config_.zero_layer_interval_;
-  for (size_t i = start_index; i <= end_index; ++i) {
-    const Point& center_point = reference_points.at(i);
-    if (center_point.s_ - last_s < config_.ctp_interval_x_) {
-      continue;
-    }
-
-    const double theta = center_point.theta_;
-    std::vector<Vec2d> one_layer_sample;
-    for (double dy = -config_.sample_half_width_;
-         dy < config_.sample_half_width_ + 1e-6;
-         dy += config_.ctp_interval_y_) {
-      const double sample_x =
-          center_point.pose_.x() - dy * std::sin(theta);
-      const double sample_y =
-          center_point.pose_.y() + dy * std::cos(theta);
-      Vec2d sample(sample_x, sample_y);
-      if (!env.IsCollision(sample, config_.collision_margin_)) {
-        one_layer_sample.emplace_back(sample);
-      }
-    }
-
-    if (!one_layer_sample.empty()) {
-      control_point_samples.push_back(one_layer_sample);
-      layer_centers.push_back(center_point.pose_);
-      last_s = center_point.s_;
+  // Sliding window: start after the front control point (layer 3).
+  const size_t front_index =
+      reference_line.FindNearestIndex(front_ctp.x(), front_ctp.y());
+  const double front_s = reference_points.at(front_index).s_;
+  size_t window_start = 0;
+  for (size_t i = 0; i < cached_layer_s_.size(); ++i) {
+    if (cached_layer_s_[i] - front_s >= config_.ctp_interval_x_) {
+      window_start = i;
+      break;
     }
   }
+  size_t window_count = 0;
+  std::vector<std::vector<Vec2d>> active_control_points;
+  double min_x = std::numeric_limits<double>::infinity();
+  double min_y = std::numeric_limits<double>::infinity();
+  double max_x = -std::numeric_limits<double>::infinity();
+  double max_y = -std::numeric_limits<double>::infinity();
+  for (size_t i = window_start; i < cached_valid_control_points_.size(); ++i) {
+    if (window_count >= config_.max_layers_) {
+      break;
+    }
+    if (cached_valid_control_points_[i].empty()) {
+      continue;
+    }
+    const std::vector<Vec2d>& layer_points = cached_valid_control_points_[i];
+    control_point_samples.push_back(layer_points);
+    layer_centers.push_back(cached_layer_centers_[i]);
+    active_control_points.push_back(layer_points);
+    const bool force_full =
+        i < cached_layer_has_obstacle_.size() && cached_layer_has_obstacle_[i];
+    window_layer_force_full_.push_back(force_full);
+    for (const auto& p : layer_points) {
+      min_x = std::min(min_x, p.x());
+      min_y = std::min(min_y, p.y());
+      max_x = std::max(max_x, p.x());
+      max_y = std::max(max_y, p.y());
+    }
+    window_count += 1;
+  }
 
-  debug_info_.sample_control_points_ = control_point_samples;
-  debug_info_.reference_line_points_.assign(
-      reference_points.begin() + start_index,
-      reference_points.begin() + end_index + 1);
+  debug_info_.sample_control_points_.clear();
+  debug_info_.sample_control_points_.push_back({back_ctp});
+  debug_info_.sample_control_points_.push_back({state.pose_});
+  debug_info_.sample_control_points_.push_back({front_ctp});
+  debug_info_.sample_control_points_.insert(
+      debug_info_.sample_control_points_.end(),
+      cached_all_control_points_.begin(),
+      cached_all_control_points_.end());
+  debug_info_.blocked_control_points_ = cached_blocked_control_points_;
+  debug_info_.active_control_points_ = active_control_points;
+  debug_info_.active_bounds_.clear();
+  if (min_x <= max_x && min_y <= max_y) {
+    debug_info_.active_bounds_.emplace_back(min_x, min_y);
+    debug_info_.active_bounds_.emplace_back(max_x, max_y);
+  }
+  debug_info_.reference_line_points_ = reference_points;
 }
 
 std::vector<Vec2d> BsplineLatticePlanner::ChooseControlPoints(
@@ -219,6 +387,45 @@ BsplineLatticePlanner::GenerateControlPointSequences(
     return {};
   }
 
+  auto compute_cost = [&](const std::vector<Vec2d>& seq) -> double {
+    if (seq.empty()) {
+      return std::numeric_limits<double>::infinity();
+    }
+    double cost = 0.0;
+    for (size_t i = 0; i < seq.size(); ++i) {
+      const Vec2d& p = seq[i];
+      const Vec2d& center = layer_centers[i];
+      cost += config_.w_center_ * DistanceSquared(p, center);
+      if (i >= 3 && i < 3 + config_.spread_layers_) {
+        cost -= config_.w_spread_ * DistanceSquared(p, center);
+      }
+      Vec2d heading_dir(0.0, 0.0);
+      if (i + 1 < seq.size()) {
+        heading_dir = seq[i + 1] - p;
+      } else if (i > 0) {
+        heading_dir = p - seq[i - 1];
+      }
+      const double heading = heading_dir.Length() > 1e-6
+                                  ? heading_dir.Angle()
+                                  : (goal - p).Angle();
+      if (env.IsCollision(p, config_.collision_margin_) ||
+          rect_collision(p, heading)) {
+        return std::numeric_limits<double>::infinity();
+      }
+      if (i >= 1) {
+        const Vec2d prev_dir = p - seq[i - 1];
+        if (prev_dir.Length() > 1e-6 && heading_dir.Length() > 1e-6) {
+          const double dtheta = std::fabs(
+              std::atan2(prev_dir.x() * heading_dir.y() - prev_dir.y() * heading_dir.x(),
+                         prev_dir.x() * heading_dir.x() + prev_dir.y() * heading_dir.y()));
+          cost += config_.w_smooth_ * dtheta * dtheta;
+        }
+      }
+    }
+    return cost;
+  };
+
+  // Step 1: Backbone search with full expansion on layer 4/5.
   std::vector<PathCandidate> beam;
   const auto& first_layer = control_point_samples.front();
   beam.reserve(first_layer.size());
@@ -228,67 +435,62 @@ BsplineLatticePlanner::GenerateControlPointSequences(
     c.cost = 0.0;
     beam.push_back(std::move(c));
   }
-
   for (size_t layer = 1; layer < control_point_samples.size(); ++layer) {
     const auto& candidates = control_point_samples[layer];
     if (candidates.empty()) {
       continue;
     }
-
     std::vector<PathCandidate> next_beam;
     next_beam.reserve(beam.size() * candidates.size());
-
+    const size_t hard_cap = std::max<size_t>(config_.max_sequences_, 1);
+    const size_t soft_cap = hard_cap * 4;
     for (const auto& prev : beam) {
-      const Vec2d& last = prev.points.back();
-      Vec2d last_dir(0.0, 0.0);
-      bool has_last_dir = false;
-      if (prev.points.size() >= 2) {
-        last_dir = last - prev.points[prev.points.size() - 2];
-        has_last_dir = last_dir.Length() > 1e-6;
-      }
-
-      for (const auto& p : candidates) {
-        PathCandidate c = prev;
-        c.points.push_back(p);
-
-        double cost = prev.cost;
+      if (layer >= 5) {
         const Vec2d& center = layer_centers[layer];
-        cost += config_.w_center_ * DistanceSquared(p, center);
-
-        const Vec2d new_dir = p - last;
-        const double new_len = new_dir.Length();
-        double heading = 0.0;
-        if (new_len > 1e-6) {
-          heading = new_dir.Angle();
-        } else if (has_last_dir) {
-          heading = last_dir.Angle();
-        } else {
-          heading = (goal - p).Angle();
-        }
-
-        if (env.IsCollision(p, config_.collision_margin_) ||
-            rect_collision(p, heading)) {
+        PathCandidate c = prev;
+        c.points.push_back(center);
+        c.cost = compute_cost(c.points);
+        if (!std::isfinite(c.cost)) {
           continue;
         }
-
-        if (has_last_dir && new_len > 1e-6) {
-          const double dtheta = std::fabs(
-              std::atan2(last_dir.x() * new_dir.y() - last_dir.y() * new_dir.x(),
-                         last_dir.x() * new_dir.x() + last_dir.y() * new_dir.y()));
-          cost += config_.w_smooth_ * dtheta * dtheta;
-        }
-
-        c.cost = cost;
         next_beam.push_back(std::move(c));
+      } else {
+        for (const auto& p : candidates) {
+          PathCandidate c = prev;
+          c.points.push_back(p);
+          c.cost = compute_cost(c.points);
+          if (!std::isfinite(c.cost)) {
+            continue;
+          }
+          next_beam.push_back(std::move(c));
+          if (next_beam.size() >= soft_cap) {
+            std::nth_element(next_beam.begin(),
+                             next_beam.begin() + hard_cap,
+                             next_beam.end(),
+                             [](const PathCandidate& a, const PathCandidate& b) {
+                               return a.cost < b.cost;
+                             });
+            next_beam.resize(hard_cap);
+          }
+        }
       }
     }
-
     std::sort(next_beam.begin(), next_beam.end(),
               [](const PathCandidate& a, const PathCandidate& b) {
                 return a.cost < b.cost;
               });
-    if (next_beam.size() > config_.beam_width_) {
-      next_beam.resize(config_.beam_width_);
+    if (next_beam.size() > config_.max_sequences_) {
+      std::nth_element(next_beam.begin(),
+                       next_beam.begin() + config_.max_sequences_,
+                       next_beam.end(),
+                       [](const PathCandidate& a, const PathCandidate& b) {
+                         return a.cost < b.cost;
+                       });
+      next_beam.resize(config_.max_sequences_);
+      std::sort(next_beam.begin(), next_beam.end(),
+                [](const PathCandidate& a, const PathCandidate& b) {
+                  return a.cost < b.cost;
+                });
     }
     beam = std::move(next_beam);
   }
@@ -297,8 +499,8 @@ BsplineLatticePlanner::GenerateControlPointSequences(
             [](const PathCandidate& a, const PathCandidate& b) {
               return a.cost < b.cost;
             });
-  if (beam.size() > config_.max_candidate_paths_) {
-    beam.resize(config_.max_candidate_paths_);
+  if (beam.size() > config_.max_sequences_) {
+    beam.resize(config_.max_sequences_);
   }
 
   std::vector<std::vector<Vec2d>> sequences;

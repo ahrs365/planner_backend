@@ -74,11 +74,15 @@ struct Config {
   double vehicle_length_ = 0.7;
   double vehicle_width_ = 0.7;
   double collision_margin_ = 0.05;
+  size_t max_layers_ = 10;
+  size_t spread_layers_ = 2;
+  double w_spread_ = 0.6;
   size_t beam_width_ = 8;
   size_t max_candidate_paths_ = 12;
   double w_center_ = 1.0;
   double w_smooth_ = 1.5;
   double w_collision_ = 1000.0;
+  size_t max_sequences_ = 2000;
 };
 
 struct Obstacle {
@@ -104,6 +108,9 @@ struct Environment {
 
 struct DebugInfo {
   std::vector<std::vector<Vec2d>> sample_control_points_;
+  std::vector<std::vector<Vec2d>> blocked_control_points_;
+  std::vector<std::vector<Vec2d>> active_control_points_;
+  std::vector<Vec2d> active_bounds_;
   std::vector<Point> reference_line_points_;
   std::vector<Vec2d> chosen_control_points_;
   std::vector<std::vector<Point>> bspline_samples_;
