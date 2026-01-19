@@ -1,6 +1,6 @@
 # Planner Backend (planner_backend)
 
-![1](https://github.com/user-attachments/assets/50dda76e-30ae-49fd-a57b-65f18b20056a)
+![bspline](https://github.com/user-attachments/assets/bc85f2c3-53c3-424f-9a8b-94badbf39b09)
 
 [English](#english) | [中文](#中文)
 
@@ -60,6 +60,11 @@ backend/
     ├── tmpc/           # TMPC algorithm
     └── servers/        # WebSocket servers
 ```
+https://github.com/ZJU-FAST-Lab/DDR-opt
+
+https://github.com/tud-amr/mpc_planner
+
+https://github.com/ahrs365/tmpc
 
 ---
 
@@ -119,6 +124,12 @@ backend/
 ```
 
 ---
+
+https://github.com/ZJU-FAST-Lab/DDR-opt
+
+https://github.com/tud-amr/mpc_planner
+
+https://github.com/ahrs365/tmpc
 
 ## License
 
