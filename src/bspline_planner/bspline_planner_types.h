@@ -67,7 +67,7 @@ struct Config {
   double reference_interval_ = 0.2;
   double sample_length_ = 10.0;
   double ctp_interval_x_ = 0.6;
-  double sample_half_width_ = 1.5;
+  double sample_half_width_ = 1.0;
   double ctp_interval_y_ = 0.5;
   double zero_layer_interval_ = 0.5;
   double bspline_interval_ = 0.02;

@@ -222,12 +222,31 @@ int main(int argc, char** argv) {
         response["trajectories"] = json::array();
       }
 
+      // Always send active window info for real-time visualization.
+      {
+        const auto& debug = planner.GetDebugInfo();
+        json active_layers = json::array();
+        for (const auto& layer : debug.active_control_points_) {
+          json layer_points = json::array();
+          for (const auto& p : layer) {
+            layer_points.push_back({{"x", p.x()}, {"y", p.y()}});
+          }
+          active_layers.push_back(layer_points);
+        }
+        response["activeControlPoints"] = active_layers;
+        if (debug.active_bounds_.size() == 2) {
+          response["activeBounds"] = {
+              {"min", {{"x", debug.active_bounds_[0].x()}, {"y", debug.active_bounds_[0].y()}}},
+              {"max", {{"x", debug.active_bounds_[1].x()}, {"y", debug.active_bounds_[1].y()}}},
+          };
+        }
+      }
+
       const bool want_debug = payload.value("wantDebug", false);
       if (want_debug) {
         const auto& debug = planner.GetDebugInfo();
         json sampled_layers = json::array();
         json blocked_layers = json::array();
-        json active_layers = json::array();
         for (const auto& layer : debug.sample_control_points_) {
           json layer_points = json::array();
           for (const auto& p : layer) {
@@ -242,22 +261,8 @@ int main(int argc, char** argv) {
           }
           blocked_layers.push_back(layer_points);
         }
-        for (const auto& layer : debug.active_control_points_) {
-          json layer_points = json::array();
-          for (const auto& p : layer) {
-            layer_points.push_back({{"x", p.x()}, {"y", p.y()}});
-          }
-          active_layers.push_back(layer_points);
-        }
         response["sampledControlPoints"] = sampled_layers;
         response["blockedControlPoints"] = blocked_layers;
-        response["activeControlPoints"] = active_layers;
-        if (debug.active_bounds_.size() == 2) {
-          response["activeBounds"] = {
-              {"min", {{"x", debug.active_bounds_[0].x()}, {"y", debug.active_bounds_[0].y()}}},
-              {"max", {{"x", debug.active_bounds_[1].x()}, {"y", debug.active_bounds_[1].y()}}},
-          };
-        }
         response["referenceLine"] =
             serializeReferenceLine(debug.reference_line_points_);
       }
