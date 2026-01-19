@@ -55,6 +55,20 @@ if(BUILD_DWA_SERVER)
   )
 endif()
 
+# Bspline Server
+if(BUILD_BSPLINE_SERVER)
+  add_planner_server(bspline_server
+    PLANNER_SOURCES
+      ${SRC_DIR}/bspline_planner/bspline_lattice_planner.cpp
+      ${SRC_DIR}/bspline_planner/bspline_curve.cpp
+      ${SRC_DIR}/bspline_planner/reference_line.cpp
+    SERVER_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/bspline_server.cpp
+    EXTRA_INCLUDES
+      ${SRC_DIR}/bspline_planner
+  )
+endif()
+
 # DDR-OPT Server
 if(BUILD_DDR_OPT_SERVER)
   add_planner_server(ddr_opt_server

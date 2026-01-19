@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_DWA_SERVER "Build DWA planner server" ON)
 option(BUILD_DDR_OPT_SERVER "Build DDR optimization server" ON)
 option(BUILD_TMPC_SERVER "Build TMPC planner server" ON)
+option(BUILD_BSPLINE_SERVER "Build Bspline planner server" ON)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -46,5 +47,6 @@ message(STATUS "========================================")
 message(STATUS "DWA Server:      ${BUILD_DWA_SERVER}")
 message(STATUS "DDR-OPT Server:  ${BUILD_DDR_OPT_SERVER}")
 message(STATUS "TMPC Server:     ${BUILD_TMPC_SERVER}")
+message(STATUS "Bspline Server:  ${BUILD_BSPLINE_SERVER}")
 message(STATUS "========================================")
 
