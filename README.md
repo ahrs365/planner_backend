@@ -25,13 +25,14 @@ Local planning algorithms backend for the web robot simulation.
 - CMake 3.20+
 - C++17 compiler (GCC 9+ / Clang 10+)
 - Git
-- libgsl-dev (only required system dependency)
-
-Install libgsl-dev:
+- libgsl-dev
+- boost
+Install libgsl-dev and boost:
 
 ```bash
 sudo apt-get update
 sudo apt-get install libgsl-dev
+sudo apt-get install libboost-all-dev
 ```
 
 ### Build
@@ -99,12 +100,13 @@ Web 机器人仿真的本地规划算法后端。
 - C++17 编译器 (GCC 9+ / Clang 10+)
 - Git
 - libgsl-dev（唯一需要安装的系统依赖）
-
-安装 libgsl-dev：
+- boost(如果是纯净的新系统，也需要安装)
+安装 libgsl-dev和boost：
 
 ```bash
 sudo apt-get update
 sudo apt-get install libgsl-dev
+sudo apt-get install libboost-all-dev
 ```
 
 ### 编译
