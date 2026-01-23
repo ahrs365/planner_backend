@@ -155,6 +155,11 @@ https://github.com/tud-amr/mpc_planner
 
 https://github.com/ahrs365/tmpc
 
+有任何使用上的问题，可以加入交流群反映：
+
+![e59d3ef086a08121a05bdb8d6fa89477](https://github.com/user-attachments/assets/802ec453-34ab-49d0-9cdc-2e8255f3afa2)
+
+
 ## License
 
 MIT
