@@ -78,6 +78,19 @@ https://github.com/tud-amr/mpc_planner
 
 https://github.com/ahrs365/tmpc
 
+### 关于我
+#### 有任何使用上的问题，可以加入交流群反映：
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/802ec453-34ab-49d0-9cdc-2e8255f3afa2" width="300" />
+</div>
+
+#### 关注公众号，查看更多：
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/1dbfcc22-3ccd-45f3-b163-977c51c082c2" width="300" />
+</div>
+
 ---
 
 <a name="中文"></a>
@@ -155,9 +168,18 @@ https://github.com/tud-amr/mpc_planner
 
 https://github.com/ahrs365/tmpc
 
-有任何使用上的问题，可以加入交流群反映：
+### 关于我
+#### 有任何使用上的问题，可以加入交流群反映：
 
-<img src="https://github.com/user-attachments/assets/802ec453-34ab-49d0-9cdc-2e8255f3afa2" width="20%" />
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/802ec453-34ab-49d0-9cdc-2e8255f3afa2" width="300" />
+</div>
+
+#### 关注公众号，查看更多：
+
+<div align="center">
+  <img src="https://github.com/user-attachments/assets/1dbfcc22-3ccd-45f3-b163-977c51c082c2" width="300" />
+</div>
 
 ## License
 
